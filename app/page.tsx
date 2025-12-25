@@ -1,65 +1,458 @@
-import Image from "next/image";
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { encryptMessage, generateKey, deriveKeyFromPassphrase } from "@/lib/crypto";
+import Header from "@/components/Header";
+import Footer from "@/components/Footer";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
+import { SketchpadDropzone, DropFile } from "@/components/ui/sketchpad-dropzone";
 
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<"text" | "file">("text");
+  const [secret, setSecret] = useState("");
+  const [files, setFiles] = useState<DropFile[]>([]);
+  // Legacy file state removed
+  const [generatedLink, setGeneratedLink] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [expiration, setExpiration] = useState("24 hours");
+  const [error, setError] = useState("");
+
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+  const MAX_TEXT_SIZE = 100 * 1024; // 100KB
+
+  // Passphrase state
+  const [usePassphrase, setUsePassphrase] = useState(false);
+  const [passphrase, setPassphrase] = useState("");
+
+  const expirationOptions = ["5 minutes", "1 hour", "12 hours", "24 hours"];
+
+  const getExpirationSeconds = (label: string) => {
+    switch (label) {
+      case "5 minutes": return 300;
+      case "1 hour": return 3600;
+      case "12 hours": return 43200;
+      case "24 hours": return 86400;
+      default: return 86400;
+    }
+  };
+
+  const readFileAsBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Remove data URL prefix (e.g., "data:image/png;base64,")
+        const base64 = result.split(",")[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleCreateLink = async () => {
+    if (activeTab === "text" && !secret.trim()) return;
+    if (activeTab === "file" && files.length === 0) return;
+    if (usePassphrase && !passphrase.trim()) return;
+
+    // Calculate total size
+    const totalSize = files.reduce((acc, f) => acc + f.file.size, 0);
+
+    if (activeTab === "file" && totalSize > MAX_FILE_SIZE) {
+      setError(`Total size too large. Max allowed is ${MAX_FILE_SIZE / (1024 * 1024)}MB.`);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      // 1. Prepare Payload
+      let payloadObj;
+      if (activeTab === "text") {
+        if (secret.length > MAX_TEXT_SIZE) {
+          throw new Error(`Text too long. Max allowed is ${MAX_TEXT_SIZE / 1024}KB.`);
+        }
+        payloadObj = {
+          type: "text",
+          content: secret,
+        };
+      } else {
+        let fileToUpload: File;
+        let fileName: string;
+        let mimeType: string;
+
+        if (files.length === 1) {
+          fileToUpload = files[0].file;
+          fileName = fileToUpload.name;
+          mimeType = fileToUpload.type;
+        } else {
+          // Zip multiple files
+          const JSZip = (await import("jszip")).default;
+          const zip = new JSZip();
+
+          files.forEach((f) => {
+            zip.file(f.file.name, f.file);
+          });
+
+          const blob = await zip.generateAsync({ type: "blob" });
+          fileToUpload = new File([blob], "archive.zip", { type: "application/zip" });
+          fileName = "archive.zip";
+          mimeType = "application/zip";
+        }
+
+        const base64Content = await readFileAsBase64(fileToUpload);
+        payloadObj = {
+          type: "file",
+          content: base64Content,
+          fileName: fileName,
+          mimeType: mimeType,
+        };
+      }
+
+      let payload = JSON.stringify(payloadObj);
+      let key;
+      let salt = "";
+
+      // 2. Generate Key (Random or Derived)
+      if (usePassphrase) {
+        salt = window.crypto.getRandomValues(new Uint8Array(16)).join(","); // Simple comma-separated string for storage
+        key = await deriveKeyFromPassphrase(passphrase, salt);
+      } else {
+        key = await generateKey();
+      }
+
+      // 3. Encrypt Payload
+      const encryptedJson = await encryptMessage(payload, key);
+      const encryptedDataObj = JSON.parse(encryptedJson);
+
+      // If using passphrase, we need to store the salt alongside the encrypted data
+      if (usePassphrase) {
+        encryptedDataObj.salt = salt;
+        encryptedDataObj.passphraseProtected = true;
+      }
+
+      const finalEncryptedContent = JSON.stringify(encryptedDataObj);
+
+      // 4. Calculate Expiration
+      const duration = getExpirationSeconds(expiration);
+      const expiresAt = new Date(Date.now() + duration * 1000).toISOString();
+
+      // 5. Insert into Supabase
+      const { data, error } = await supabase
+        .from("secrets")
+        .insert({
+          encrypted_content: finalEncryptedContent,
+          expires_at: expiresAt,
+        })
+        .select("id")
+        .single();
+
+      if (error) {
+        console.error("Supabase error:", error);
+        throw new Error("Supabase insert failed");
+      }
+
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+
+      if (usePassphrase) {
+        // Passphrase Protected: No key in URL
+        setGeneratedLink(`${origin}/view/${data.id}`);
+      } else {
+        // Standard: Key in URL hash
+        setGeneratedLink(`${origin}/view/${data.id}#${key}`);
+      }
+
+    } catch (err: any) {
+      console.warn("Backend failed or Validation error:", err);
+
+      if (err.message && (err.message.includes("too long") || err.message.includes("too large"))) {
+        setError(err.message);
+        setLoading(false);
+        return;
+      }
+
+      console.warn("Using client-side fallback mode due to:", err);
+      // Fallback: Client-side URL hash mode
+      if (activeTab === "file") {
+        setError("Backend unavailable: Files cannot be shared in offline/fallback mode.");
+        setLoading(false);
+        return;
+      }
+
+      if (usePassphrase) {
+        setError("Backend unavailable: Passphrase protection requires backend storage.");
+        setLoading(false);
+        return;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const duration = getExpirationSeconds(expiration);
+
+      const payload = JSON.stringify({
+        type: "text",
+        content: secret,
+      });
+
+      const hash = "#" + encodeURIComponent(payload) + "|" + duration;
+      setGeneratedLink(
+        `${origin}/view/` + Math.random().toString(36).substring(7) + hash
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(generatedLink);
+  };
+
+  const clearSecret = () => {
+    setSecret("");
+    setFiles([]);
+    setGeneratedLink("");
+  };
+
+  const totalSize = files.reduce((acc, f) => acc + f.file.size, 0);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+    <>
+      <Header />
+
+      <main className="flex-grow flex flex-col items-center justify-start pt-16 pb-24 px-4 sm:px-6 relative overflow-hidden">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-primary/5 blur-[120px] rounded-full pointer-events-none -z-10"></div>
+        <div className="w-full max-w-3xl flex flex-col gap-8 z-10">
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 mb-2">
+              <h2 className="text-3xl font-semibold text-white tracking-tight">
+                Create a secure link
+              </h2>
+            </div>
+            <p className="text-text-muted max-w-2xl text-base leading-relaxed">
+              Share text or files securely. Data is encrypted in your browser and accessible only once.
+            </p>
+          </div>
+
+          <div className="w-full bg-surface-dark rounded-xl border border-border-dark shadow-card">
+            {/* Tabs */}
+            <div className="flex items-center border-b border-border-dark bg-surface-dark px-4 pt-4 gap-4 rounded-t-xl">
+              <button
+                onClick={() => { setActiveTab("text"); setGeneratedLink(""); setError(""); }}
+                className={`pb-3 px-2 text-sm font-medium transition-all relative ${activeTab === "text" ? "text-white" : "text-text-muted hover:text-text-main"
+                  }`}
+              >
+                Text
+                {activeTab === "text" && (
+                  <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
+                )}
+              </button>
+              <button
+                onClick={() => { setActiveTab("file"); setGeneratedLink(""); setError(""); }}
+                className={`pb-3 px-2 text-sm font-medium transition-all relative ${activeTab === "file" ? "text-white" : "text-text-muted hover:text-text-main"
+                  }`}
+              >
+                File
+                {activeTab === "file" && (
+                  <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
+                )}
+              </button>
+            </div>
+
+            <div className="relative">
+
+              {activeTab === "text" ? (
+                <>
+                  <label className="sr-only" htmlFor="secret-input">
+                    Secret Content
+                  </label>
+                  <textarea
+                    className="w-full min-h-[220px] bg-transparent text-text-main placeholder:text-text-subtle p-6 text-base font-mono border-none focus:ring-0 resize-none leading-relaxed focus:outline-none"
+                    id="secret-input"
+                    placeholder="Paste password, API key, or sensitive data..."
+                    spellCheck="false"
+                    value={secret}
+                    onChange={(e) => setSecret(e.target.value)}
+                  ></textarea>
+                </>
+              ) : (
+                <div className="w-full min-h-[220px] p-6">
+                  <SketchpadDropzone
+                    files={files}
+                    onDrop={(fileList) => {
+                      const newFiles = Array.from(fileList).map((file) => ({
+                        id: crypto.randomUUID(),
+                        file
+                      }));
+                      setFiles((prev) => [...prev, ...newFiles]);
+                    }}
+                    onRemove={(id) => {
+                      setFiles((prev) => prev.filter((f) => f.id !== id));
+                    }}
+                    onClear={() => setFiles([])}
+                  />
+                  {/* Warning if multiple files */}
+                  {/* Message removed as multi-file is now supported */}
+                  {files.length > 1 && (
+                    <p className="text-xs text-text-muted mt-2 text-center">
+                      {files.length} files will be zipped into a single archive.
+                    </p>
+                  )}
+                </div>
+              )}
+              {error && (
+                <div className="mx-6 mb-4 p-3 bg-danger/10 border border-danger/20 rounded-lg flex items-center gap-3 animate-fade-in">
+                  <span className="material-symbols-outlined text-danger text-[20px]">error</span>
+                  <p className="text-sm text-danger-text">{error}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 bg-surface-dark border-t border-border-dark flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-6">
+                  <label className="inline-flex items-center cursor-pointer group">
+                    <input
+                      className="sr-only peer"
+                      type="checkbox"
+                      checked={usePassphrase}
+                      onChange={(e) => setUsePassphrase(e.target.checked)}
+                    />
+                    <div className="w-9 h-5 bg-surface-lighter border border-border-light peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-muted after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-white peer-checked:after:border-white relative"></div>
+                    <span className="ml-3 text-sm font-medium text-text-muted group-hover:text-text-main transition-colors flex items-center gap-2">
+                      Passphrase Protection
+                    </span>
+                  </label>
+                </div>
+
+                {usePassphrase && (
+                  <div className="animate-fade-in pl-12">
+                    <input
+                      type="password"
+                      placeholder="Enter a strong passphrase..."
+                      className="w-full sm:w-64 bg-background-dark border border-border-light rounded-md px-3 py-2 text-sm text-text-main placeholder:text-text-subtle focus:outline-none focus:border-primary transition-colors"
+                      value={passphrase}
+                      onChange={(e) => setPassphrase(e.target.value)}
+                    />
+                    <p className="text-[11px] text-text-muted mt-1">
+                      You will need this password to open the link. We do not store it.
+                    </p>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2 text-sm text-text-muted">
+                <span>Expires in</span>
+                <div className="relative">
+                  <DropdownMenu
+                    options={expirationOptions.map((option) => ({
+                      label: option,
+                      onClick: () => setExpiration(option),
+                    }))}
+                  >
+                    {expiration}
+                  </DropdownMenu>
+                </div>
+              </div>
+            </div>
+            <div className="p-6 bg-surface-dark border-t border-border-dark flex justify-end rounded-b-xl">
+              <button
+                onClick={handleCreateLink}
+                disabled={loading || (activeTab === "text" && !secret.trim()) || (activeTab === "file" && files.length === 0) || (usePassphrase && !passphrase.trim())}
+                className={`w-full sm:w-auto flex items-center justify-center gap-2 rounded-md bg-primary hover:bg-primary-hover px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:shadow-md cursor-pointer ${loading || (activeTab === "text" && !secret.trim()) || (activeTab === "file" && files.length === 0) || (usePassphrase && !passphrase.trim())
+                  ? "opacity-50 cursor-not-allowed"
+                  : ""
+                  }`}
+              >
+                {loading ? (
+                  <span className="material-symbols-outlined text-[18px] animate-spin">
+                    progress_activity
+                  </span>
+                ) : (
+                  <span className="material-symbols-outlined text-[18px]">
+                    link
+                  </span>
+                )}
+                {loading ? "Creating..." : "Create Link"}
+              </button>
+            </div>
+          </div>
+
+          {generatedLink && (
+            <div className="w-full bg-surface-dark rounded-xl border border-border-dark p-1 flex flex-col sm:flex-row items-center gap-3 relative overflow-hidden animate-fade-in">
+              <div className="flex-grow w-full min-w-0 bg-background-dark rounded-lg border border-border-dark p-3 flex items-center justify-between group">
+                <span className="text-text-subtle select-none text-sm pl-1 truncate max-w-[150px] sm:max-w-none">
+                  {generatedLink.substring(0, 24)}...
+                </span>
+                <span className="text-white font-mono text-sm truncate px-2 hidden sm:block">
+                  {generatedLink.split("/").pop()}
+                </span>
+                <button
+                  onClick={copyToClipboard}
+                  className="p-1.5 hover:bg-surface-lighter text-text-muted hover:text-white rounded-md transition-colors"
+                  title="Copy"
+                >
+                  <span className="material-symbols-outlined text-[18px]">
+                    content_copy
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4">
+            <div className="flex flex-col gap-3 p-5 rounded-xl bg-surface-dark border border-border-dark hover:border-border-light transition-colors group">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-md bg-surface-lighter border border-border-light flex items-center justify-center text-text-muted group-hover:text-white transition-colors">
+                  <span className="material-symbols-outlined text-[18px]">
+                    visibility_off
+                  </span>
+                </div>
+                <h3 className="text-white font-medium text-sm">Burn on Read</h3>
+              </div>
+              <p className="text-xs text-text-muted leading-relaxed pl-11">
+                The secret is permanently deleted from our servers instantly
+                after it is viewed once.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 p-5 rounded-xl bg-surface-dark border border-border-dark hover:border-border-light transition-colors group">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-md bg-surface-lighter border border-border-light flex items-center justify-center text-text-muted group-hover:text-white transition-colors">
+                  <span className="material-symbols-outlined text-[18px]">
+                    encrypted
+                  </span>
+                </div>
+                <h3 className="text-white font-medium text-sm">
+                  Zero Knowledge
+                </h3>
+              </div>
+              <p className="text-xs text-text-muted leading-relaxed pl-11">
+                Your data is encrypted in your browser. We can&#39;t read your
+                secrets even if we wanted to.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 p-5 rounded-xl bg-surface-dark border border-border-dark hover:border-border-light transition-colors group">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-md bg-surface-lighter border border-border-light flex items-center justify-center text-text-muted group-hover:text-white transition-colors">
+                  <span className="material-symbols-outlined text-[18px]">
+                    auto_delete
+                  </span>
+                </div>
+                <h3 className="text-white font-medium text-sm">
+                  Auto Expiration
+                </h3>
+              </div>
+              <p className="text-xs text-text-muted leading-relaxed pl-11">
+                If the link isn&#39;t opened within 24 hours, it automatically
+                expires and the data is wiped.
+              </p>
+            </div>
+          </div>
         </div>
       </main>
-    </div>
+
+      <Footer />
+    </>
   );
 }
