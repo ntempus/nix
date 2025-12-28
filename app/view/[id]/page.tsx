@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -74,7 +73,6 @@ export default function SecretView() {
 
                     let isProtected = false;
                     let salt = "";
-                    let finalEncryptedContent = data.encrypted_content;
 
                     try {
                         const parsed = JSON.parse(data.encrypted_content);
@@ -88,7 +86,7 @@ export default function SecretView() {
                             // We can just pass the stringified version of this object to decryptMessage 
                             // because decryptMessage only looks for 'iv' and 'data'.
                         }
-                    } catch (e) {
+                    } catch {
                         // Not JSON, or standard structure.
                     }
 
@@ -129,13 +127,14 @@ export default function SecretView() {
                                 // Fallback for unknown JSON structures (treat as text)
                                 setSecret(decrypted);
                             }
-                        } catch (e) {
+                        } catch {
                             // Valid JSON parse error -> It's a legacy text secret
                             setSecret(decrypted);
                         }
 
-                    } catch (err: any) {
-                        if (err.message && err.message.includes("Corrupted Data")) {
+                    } catch (err: unknown) {
+                        const errorMessage = err instanceof Error ? err.message : "Unknown error";
+                        if (errorMessage.includes("Corrupted Data")) {
                             setLoadingMessage("Secret data is corrupted or invalid.");
                         } else {
                             setLoadingMessage("Failed to decrypt. Invalid key.");
@@ -146,7 +145,7 @@ export default function SecretView() {
                     // Burn on Read logic is disabled to allow persistence until expiration
                     // await supabase.from('secrets').delete().eq('id', id);
 
-                } catch (err: any) {
+                } catch (err: unknown) {
                     console.error("Backend fetch error", err);
                     setLoadingMessage("Error retrieving secret.");
                 }
@@ -294,16 +293,17 @@ export default function SecretView() {
                 } else {
                     setSecret(decrypted);
                 }
-            } catch (e) {
+            } catch {
                 setSecret(decrypted);
             }
 
             // Turn off protection mode to reveal content
             setIsPassphraseProtected(false);
 
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
-            if (err.message && err.message.includes("Corrupted Data")) {
+            const errorMessage = err instanceof Error ? err.message : "";
+            if (errorMessage && errorMessage.includes("Corrupted Data")) {
                 setPassphraseError("Secret data is corrupted.");
             } else {
                 setPassphraseError("Incorrect passphrase. Please try again.");

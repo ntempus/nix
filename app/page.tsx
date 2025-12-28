@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { encryptMessage, generateKey, deriveKeyFromPassphrase } from "@/lib/crypto";
@@ -112,7 +111,7 @@ export default function Home() {
         };
       }
 
-      let payload = JSON.stringify(payloadObj);
+      const payload = JSON.stringify(payloadObj);
       let key;
       let salt = "";
 
@@ -151,8 +150,8 @@ export default function Home() {
         .single();
 
       if (error) {
-        console.error("Supabase error:", error);
-        throw new Error("Supabase insert failed");
+        console.error("Supabase error:", JSON.stringify(error, null, 2));
+        throw new Error(error.message || "Supabase insert failed");
       }
 
       const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -165,11 +164,13 @@ export default function Home() {
         setGeneratedLink(`${origin}/view/${data.id}#${key}`);
       }
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn("Backend failed or Validation error:", err);
 
-      if (err.message && (err.message.includes("too long") || err.message.includes("too large"))) {
-        setError(err.message);
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+
+      if (errorMessage && (errorMessage.includes("too long") || errorMessage.includes("too large"))) {
+        setError(errorMessage);
         setLoading(false);
         return;
       }
@@ -210,14 +211,6 @@ export default function Home() {
     navigator.clipboard.writeText(generatedLink);
   };
 
-  const clearSecret = () => {
-    setSecret("");
-    setFiles([]);
-    setGeneratedLink("");
-  };
-
-  const totalSize = files.reduce((acc, f) => acc + f.file.size, 0);
-
   return (
     <>
       <Header />
@@ -225,8 +218,8 @@ export default function Home() {
       <main className="flex-grow flex flex-col items-center justify-start pt-16 pb-24 px-4 sm:px-6 relative overflow-hidden">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-primary/5 blur-[120px] rounded-full pointer-events-none -z-10"></div>
         <div className="w-full max-w-3xl flex flex-col gap-8 z-10">
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 mb-2">
+          <div className="space-y-4 flex flex-col items-center text-center">
+            <div className="flex items-center gap-2 mb-2 justify-center">
               <h2 className="text-3xl font-semibold text-white tracking-tight">
                 Create a secure link
               </h2>

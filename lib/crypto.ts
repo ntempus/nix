@@ -110,9 +110,9 @@ export async function decryptMessage(encryptedJson: string, keyString: string) {
 
     const decoder = new TextDecoder();
     return decoder.decode(decrypted);
-  } catch (e: any) {
+  } catch (e: unknown) {
     // If it's already one of our errors, rethrow it
-    if (e.message.startsWith("Corrupted Data")) {
+    if (e instanceof Error && e.message.startsWith("Corrupted Data")) {
       throw e;
     }
     // Otherwise it's likely a key mismatch or general crypto failure

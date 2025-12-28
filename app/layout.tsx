@@ -16,7 +16,25 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "Nix - Secure One-Time Sharing",
-  description: "Share sensitive data securely with one-time viewable links.",
+  description: "Share sensitive data securely with one-time viewable links. Encrypted in your browser, ephemeral, and zero-knowledge.",
+  keywords: ["secure file sharing", "one-time link", "encrypted sharing", "self-destructing messages", "password share", "secret link"],
+  authors: [{ name: "Nix" }],
+  creator: "Nix",
+  metadataBase: new URL("https://nix-share.com"),
+  openGraph: {
+    title: "Nix - Secure One-Time Sharing",
+    description: "Share sensitive data securely with one-time viewable links. Zero knowledge, end-to-end encrypted.",
+    url: "https://nix-share.com",
+    siteName: "Nix",
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Nix - Secure One-Time Sharing",
+    description: "Share sensitive data securely with one-time viewable links.",
+    creator: "@nixshare",
+  },
 };
 
 export default function RootLayout({
