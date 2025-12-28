@@ -7,6 +7,7 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { SketchpadDropzone, DropFile } from "@/components/ui/sketchpad-dropzone";
+import { AnimatePresence, motion } from "framer-motion";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<"text" | "file">("text");
@@ -15,7 +16,7 @@ export default function Home() {
   // Legacy file state removed
   const [generatedLink, setGeneratedLink] = useState("");
   const [loading, setLoading] = useState(false);
-  const [expiration, setExpiration] = useState("24 hours");
+  const [expiration, setExpiration] = useState("Instant");
   const [error, setError] = useState("");
 
   const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -24,8 +25,9 @@ export default function Home() {
   // Passphrase state
   const [usePassphrase, setUsePassphrase] = useState(false);
   const [passphrase, setPassphrase] = useState("");
+  const [showPassphrase, setShowPassphrase] = useState(false);
 
-  const expirationOptions = ["5 minutes", "1 hour", "12 hours", "24 hours"];
+  const expirationOptions = ["Instant", "5 minutes", "1 hour", "12 hours", "24 hours"];
 
   const getExpirationSeconds = (label: string) => {
     switch (label) {
@@ -33,6 +35,7 @@ export default function Home() {
       case "1 hour": return 3600;
       case "12 hours": return 43200;
       case "24 hours": return 86400;
+      case "Instant": return 86400; // Default to 24h as fallback, handled by burnAfterRead
       default: return 86400;
     }
   };
@@ -133,6 +136,11 @@ export default function Home() {
         encryptedDataObj.passphraseProtected = true;
       }
 
+      // Handle Instant Expiration (Burn on Read)
+      if (expiration === "Instant") {
+        encryptedDataObj.burnAfterRead = true;
+      }
+
       const finalEncryptedContent = JSON.stringify(encryptedDataObj);
 
       // 4. Calculate Expiration
@@ -189,6 +197,12 @@ export default function Home() {
         return;
       }
 
+      if (expiration === "Instant") {
+        setError("Backend unavailable: 'Instant' expiration requires backend storage.");
+        setLoading(false);
+        return;
+      }
+
       await new Promise((resolve) => setTimeout(resolve, 1500));
       const origin = typeof window !== "undefined" ? window.location.origin : "";
       const duration = getExpirationSeconds(expiration);
@@ -207,8 +221,12 @@ export default function Home() {
     }
   };
 
+  const [isCopied, setIsCopied] = useState(false);
+
   const copyToClipboard = () => {
     navigator.clipboard.writeText(generatedLink);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
   };
 
   return (
@@ -320,20 +338,39 @@ export default function Home() {
                   </label>
                 </div>
 
-                {usePassphrase && (
-                  <div className="animate-fade-in pl-12">
-                    <input
-                      type="password"
-                      placeholder="Enter a strong passphrase..."
-                      className="w-full sm:w-64 bg-background-dark border border-border-light rounded-md px-3 py-2 text-sm text-text-main placeholder:text-text-subtle focus:outline-none focus:border-primary transition-colors"
-                      value={passphrase}
-                      onChange={(e) => setPassphrase(e.target.value)}
-                    />
-                    <p className="text-[11px] text-text-muted mt-1">
-                      You will need this password to open the link. We do not store it.
-                    </p>
-                  </div>
-                )}
+                <AnimatePresence>
+                  {usePassphrase && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0, marginTop: 0 }}
+                      animate={{ height: "auto", opacity: 1, marginTop: 4 }}
+                      exit={{ height: 0, opacity: 0, marginTop: 0 }}
+                      transition={{ duration: 0.3, ease: "easeInOut" }}
+                      className="overflow-hidden pl-12"
+                    >
+                      <div className="relative w-full sm:w-64 group">
+                        <input
+                          type={showPassphrase ? "text" : "password"}
+                          placeholder="Enter a strong passphrase..."
+                          className="w-full bg-background-dark border border-border-light rounded-md pl-3 pr-10 py-2 text-sm text-text-main placeholder:text-text-subtle focus:outline-none focus:border-primary transition-colors"
+                          value={passphrase}
+                          onChange={(e) => setPassphrase(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassphrase(!showPassphrase)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-text-muted hover:text-text-main transition-all opacity-0 group-hover:opacity-100"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">
+                            {showPassphrase ? "visibility" : "visibility_off"}
+                          </span>
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-text-muted mt-1">
+                        You will need this password to open the link. We do not store it.
+                      </p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
               <div className="flex items-center gap-2 text-sm text-text-muted">
                 <span>Expires in</span>
@@ -386,8 +423,8 @@ export default function Home() {
                   className="p-1.5 hover:bg-surface-lighter text-text-muted hover:text-white rounded-md transition-colors"
                   title="Copy"
                 >
-                  <span className="material-symbols-outlined text-[18px]">
-                    content_copy
+                  <span className={`material-symbols-outlined text-[18px] transition-all ${isCopied ? 'text-green-500 scale-110' : ''}`}>
+                    {isCopied ? 'check' : 'content_copy'}
                   </span>
                 </button>
               </div>
@@ -405,8 +442,7 @@ export default function Home() {
                 <h3 className="text-white font-medium text-sm">Burn on Read</h3>
               </div>
               <p className="text-xs text-text-muted leading-relaxed pl-11">
-                The secret is permanently deleted from our servers instantly
-                after it is viewed once.
+                When you select "Instant" expiration, the link is permanently deleted after the first view.
               </p>
             </div>
             <div className="flex flex-col gap-3 p-5 rounded-xl bg-surface-dark border border-border-dark hover:border-border-light transition-colors group">
@@ -421,15 +457,14 @@ export default function Home() {
                 </h3>
               </div>
               <p className="text-xs text-text-muted leading-relaxed pl-11">
-                Your data is encrypted in your browser. We can&#39;t read your
-                secrets even if we wanted to.
+                Your data is encrypted locally. We don't have the keys, so we can't read your secrets.
               </p>
             </div>
             <div className="flex flex-col gap-3 p-5 rounded-xl bg-surface-dark border border-border-dark hover:border-border-light transition-colors group">
               <div className="flex items-center gap-3">
                 <div className="h-8 w-8 rounded-md bg-surface-lighter border border-border-light flex items-center justify-center text-text-muted group-hover:text-white transition-colors">
                   <span className="material-symbols-outlined text-[18px]">
-                    auto_delete
+                    timer
                   </span>
                 </div>
                 <h3 className="text-white font-medium text-sm">
@@ -437,8 +472,7 @@ export default function Home() {
                 </h3>
               </div>
               <p className="text-xs text-text-muted leading-relaxed pl-11">
-                If the link isn&#39;t opened within 24 hours, it automatically
-                expires and the data is wiped.
+                Set a timer for 5m, 1h, or 24h. If the link isn't opened by then, it auto-destructs.
               </p>
             </div>
           </div>

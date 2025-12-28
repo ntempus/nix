@@ -17,6 +17,7 @@ export default function SecretView() {
     // Passphrase state
     const [isPassphraseProtected, setIsPassphraseProtected] = useState(false);
     const [passphraseInput, setPassphraseInput] = useState("");
+    const [showPassphrase, setShowPassphrase] = useState(false);
     const [encryptedPkg, setEncryptedPkg] = useState<{ encrypted_content: string; salt: string } | null>(null);
     const [passphraseError, setPassphraseError] = useState("");
     const [decrypting, setDecrypting] = useState(false);
@@ -24,6 +25,7 @@ export default function SecretView() {
     // Timer logic
     const [timeLeft, setTimeLeft] = useState(0);
     const [timerInitialized, setTimerInitialized] = useState(false);
+    const [isBurnOnRead, setIsBurnOnRead] = useState(false);
 
     const params = useParams();
     // Helper to check for UUID format
@@ -86,6 +88,13 @@ export default function SecretView() {
                             // We can just pass the stringified version of this object to decryptMessage 
                             // because decryptMessage only looks for 'iv' and 'data'.
                         }
+
+                        // Check for Burn on Read (Instant)
+                        if (parsed.burnAfterRead) {
+                            setIsBurnOnRead(true);
+                            await supabase.from('secrets').delete().eq('id', id);
+                        }
+
                     } catch {
                         // Not JSON, or standard structure.
                     }
@@ -210,7 +219,7 @@ export default function SecretView() {
     }, [params]);
 
     useEffect(() => {
-        if (!timerInitialized) return;
+        if (!timerInitialized || isBurnOnRead) return;
 
         if (timeLeft <= 0) {
             setIsExpired(true);
@@ -228,7 +237,7 @@ export default function SecretView() {
         }, 1000);
 
         return () => clearInterval(timer);
-    }, [timeLeft, timerInitialized]);
+    }, [timeLeft, timerInitialized, isBurnOnRead]);
 
     const formatTime = (seconds: number) => {
         const hours = Math.floor(seconds / 3600);
@@ -279,6 +288,12 @@ export default function SecretView() {
             // 3. Parse and Reveal
             try {
                 const parsed = JSON.parse(decrypted);
+                // Check for Burn on Read in protected content
+                if (parsed.burnAfterRead) {
+                    setIsBurnOnRead(true);
+                    // Deletion already happened in fetchSecret, logic here is just for UI
+                }
+
                 if (parsed.type === 'file') {
                     if (!parsed.fileName || !parsed.mimeType || !parsed.content) {
                         throw new Error("Corrupted Data: Missing file metadata");
@@ -341,15 +356,26 @@ export default function SecretView() {
                                 <label className="text-sm font-medium text-text-muted" htmlFor="passphrase">
                                     Passphrase
                                 </label>
-                                <input
-                                    id="passphrase"
-                                    type="password"
-                                    autoFocus
-                                    className="w-full bg-background-dark border border-border-light rounded-md px-4 py-2.5 text-text-main placeholder:text-text-subtle focus:outline-none focus:border-primary transition-colors"
-                                    placeholder="Enter passphrase..."
-                                    value={passphraseInput}
-                                    onChange={(e) => setPassphraseInput(e.target.value)}
-                                />
+                                <div className="relative group">
+                                    <input
+                                        id="passphrase"
+                                        type={showPassphrase ? "text" : "password"}
+                                        autoFocus
+                                        className="w-full bg-background-dark border border-border-light rounded-md pl-4 pr-10 py-2.5 text-text-main placeholder:text-text-subtle focus:outline-none focus:border-primary transition-colors"
+                                        placeholder="Enter passphrase..."
+                                        value={passphraseInput}
+                                        onChange={(e) => setPassphraseInput(e.target.value)}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassphrase(!showPassphrase)}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-text-muted hover:text-text-main transition-all opacity-0 group-hover:opacity-100"
+                                    >
+                                        <span className="material-symbols-outlined text-[18px]">
+                                            {showPassphrase ? "visibility" : "visibility_off"}
+                                        </span>
+                                    </button>
+                                </div>
                                 {passphraseError && (
                                     <p className="text-xs text-danger animate-shake">
                                         {passphraseError}
@@ -403,17 +429,33 @@ export default function SecretView() {
                                 <h3 className="text-white font-semibold text-base flex items-center gap-2">
                                     Secret Revealed
                                 </h3>
-                                <span className="text-[10px] bg-danger/10 text-danger-text px-2 py-0.5 rounded border border-danger/20 font-medium uppercase tracking-wider">
-                                    Destructive
+                                <span className={`text-[10px] px-2 py-0.5 rounded border font-medium uppercase tracking-wider ${isBurnOnRead
+                                    ? "bg-danger/10 text-danger-text border-danger/20"
+                                    : "bg-primary/10 text-primary-glow border-primary/20"
+                                    }`}>
+                                    {isBurnOnRead ? "Destructive" : "Active"}
                                 </span>
                             </div>
                             <p className="text-text-muted text-sm leading-relaxed">
-                                This message has been destroyed from the server. <br className="hidden sm:block" />
-                                If you refresh this page or navigate away, the secret will be{" "}
-                                <strong className="text-danger-text font-medium">
-                                    lost forever
-                                </strong>
-                                .
+                                {isBurnOnRead ? (
+                                    <>
+                                        This message has been destroyed from the server. <br className="hidden sm:block" />
+                                        If you refresh this page or navigate away, the secret will be{" "}
+                                        <strong className="text-danger-text font-medium">
+                                            lost forever
+                                        </strong>
+                                        .
+                                    </>
+                                ) : (
+                                    <>
+                                        This secret will remain available until the timer expires. <br className="hidden sm:block" />
+                                        It will be deleted automatically when the{" "}
+                                        <strong className="text-white font-medium">
+                                            countdown ends
+                                        </strong>
+                                        .
+                                    </>
+                                )}
                             </p>
                         </div>
                     </div>
@@ -450,17 +492,7 @@ export default function SecretView() {
                                         spellCheck="false"
                                         value={secret}
                                     ></textarea>
-                                    <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-1 group-hover:translate-y-0 hidden sm:block">
-                                        <button
-                                            onClick={() => navigator.clipboard.writeText(secret)}
-                                            className="bg-surface hover:bg-surface-active text-text-main p-2 rounded-md shadow-lg border border-surface-highlight hover:border-surface-active transition-all"
-                                            title="Quick Copy"
-                                        >
-                                            <span className="material-symbols-outlined text-[18px]">
-                                                content_copy
-                                            </span>
-                                        </button>
-                                    </div>
+
                                 </>
                             ) : fileData ? (
                                 <div className="flex-1 flex flex-col items-center justify-center p-8 gap-6">
@@ -487,17 +519,17 @@ export default function SecretView() {
                         <div className="p-4 bg-surface/30 border-t border-surface-highlight flex flex-col sm:flex-row gap-4 justify-between items-center">
                             <div className="flex items-center gap-3 w-full sm:w-auto bg-surface/50 px-3 py-2 rounded-md border border-surface-highlight">
                                 <div className="relative flex items-center justify-center">
-                                    <span className="material-symbols-outlined text-danger text-[20px] animate-pulse">
-                                        timer
+                                    <span className={`material-symbols-outlined text-danger text-[20px] ${!isBurnOnRead ? 'animate-pulse' : ''}`}>
+                                        {isBurnOnRead ? "local_fire_department" : "timer"}
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <span className="text-[10px] text-text-dim uppercase font-bold tracking-wider">
-                                        Auto-Delete
+                                        {isBurnOnRead ? "Status" : "Auto-Delete"}
                                     </span>
                                     <span className="h-3 w-px bg-surface-highlight"></span>
                                     <span className="font-mono text-text-main text-sm font-medium">
-                                        {timerInitialized ? formatTime(timeLeft) : "..."}
+                                        {isBurnOnRead ? "Burned" : (timerInitialized ? formatTime(timeLeft) : "...")}
                                     </span>
                                 </div>
                             </div>

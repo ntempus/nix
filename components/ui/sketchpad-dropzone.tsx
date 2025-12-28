@@ -100,7 +100,7 @@ export function SketchpadDropzone({ files, onDrop, onRemove, onClear }: Sketchpa
                     </div>
                 )}
 
-                <div className="flex-1 overflow-y-auto p-8 relative w-full scrollbar-thin scrollbar-thumb-surface-highlight scrollbar-track-transparent hover:scrollbar-thumb-border-light">
+                <div className="flex-1 overflow-y-auto p-8 relative w-full custom-scrollbar">
                     <div className="flex flex-wrap gap-4 items-start content-start min-h-full">
                         {files.length === 0 && (
                             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">

@@ -14,9 +14,17 @@ export async function generateKey(): Promise<string> {
     true,
     ["encrypt", "decrypt"]
   );
-  const exported = await window.crypto.subtle.exportKey("jwk", key);
-  // Encode as URL-safe base64
-  return btoa(JSON.stringify(exported));
+  const exported = await window.crypto.subtle.exportKey("raw", key);
+  // Encode as URL-safe base64 (using browser standard methods since Buffer isn't available)
+  const bytes = new Uint8Array(exported);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  // Standard base64
+  const base64 = btoa(binary);
+  // Make URL safe: + -> -, / -> _, = -> (empty)
+  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 // 1.5 Derive a Key from a Passphrase (PBKDF2)
@@ -48,17 +56,66 @@ export async function deriveKeyFromPassphrase(passphrase: string, salt: string):
   return btoa(JSON.stringify(exported));
 }
 
+// Helper to decode Base64URL to Uint8Array
+function base64UrlToUint8Array(base64Url: string): Uint8Array {
+  const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+  const padLen = (4 - (base64.length % 4)) % 4;
+  const padded = base64 + "=".repeat(padLen);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
 // 2. Encrypt the text using the Key
 export async function encryptMessage(text: string, keyString: string) {
   checkCrypto();
-  const keyData = JSON.parse(atob(keyString));
-  const key = await window.crypto.subtle.importKey(
-    "jwk",
-    keyData,
-    { name: "AES-GCM" },
-    true,
-    ["encrypt"]
-  );
+  let key: CryptoKey | undefined;
+
+  // Try to determine format based on keyString content
+  // Legacy keys are full Base64 encoded JSON strings (start with '{')
+  // New keys are 43-char URL-safe Base64 strings
+
+  try {
+    // Attempt to parse as JWK (Legacy)
+    // We check if decoding as base64 results in a JSON string
+    try {
+      const decoded = atob(keyString);
+      if (decoded.trim().startsWith("{")) {
+        const keyData = JSON.parse(decoded);
+        key = await window.crypto.subtle.importKey(
+          "jwk",
+          keyData,
+          { name: "AES-GCM" },
+          true,
+          ["encrypt"]
+        );
+      }
+    } catch {
+      // Not a valid base64 or not JSON, fall through
+    }
+
+    if (!key) {
+      // Treat as Raw (New)
+      const rawKey = base64UrlToUint8Array(keyString);
+      key = await window.crypto.subtle.importKey(
+        "raw",
+        rawKey as BufferSource,
+        { name: "AES-GCM" },
+        true,
+        ["encrypt"]
+      );
+    }
+  } catch (e) {
+    console.error("Key import failed:", e);
+    throw new Error("Invalid Key");
+  }
+
+  if (!key) {
+    throw new Error("Could not determine key format");
+  }
 
   const iv = window.crypto.getRandomValues(new Uint8Array(12)); // Random initialization vector
   const encoder = new TextEncoder();
@@ -79,15 +136,52 @@ export async function encryptMessage(text: string, keyString: string) {
 // 3. Decrypt the message
 export async function decryptMessage(encryptedJson: string, keyString: string) {
   checkCrypto();
+  let key: CryptoKey | undefined;
+
   try {
-    const keyData = JSON.parse(atob(keyString));
-    const key = await window.crypto.subtle.importKey(
-      "jwk",
-      keyData,
-      { name: "AES-GCM" },
-      true,
-      ["decrypt"]
-    );
+    // Support both Legacy (JWK) and New (Raw) keys
+    try {
+      // Check for Legacy JWK
+      // Decoding base64 to check for JSON structure
+      // Note: atob might fail if it's not valid base64 (e.g. valid base64url but identifying characters make it fail standard atob)
+      // But our new keys are base64url, so atob needs adjustment or try block
+      let isLegacy = false;
+      try {
+        const decoded = atob(keyString); // standard atob
+        if (decoded.trim().startsWith("{")) {
+          const keyData = JSON.parse(decoded);
+          key = await window.crypto.subtle.importKey(
+            "jwk",
+            keyData,
+            { name: "AES-GCM" },
+            true,
+            ["decrypt"]
+          );
+          isLegacy = true;
+        }
+      } catch {
+        // Not standard base64 or not JSON
+      }
+
+      if (!isLegacy) {
+        // Assume New Raw Key
+        const rawKey = base64UrlToUint8Array(keyString);
+        key = await window.crypto.subtle.importKey(
+          "raw",
+          rawKey as BufferSource,
+          { name: "AES-GCM" },
+          true,
+          ["decrypt"]
+        );
+      }
+    } catch (e) {
+      console.error("Key import error:", e);
+      throw new Error("Invalid Key Format");
+    }
+
+    if (!key) {
+      throw new Error("Could not determine key format");
+    }
 
     let parsed;
     try {
