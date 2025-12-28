@@ -12,7 +12,7 @@
 
 ## Tech Stack
 
-- **Framework**: [Next.js 15](https://nextjs.org/) (App Router)
+- **Framework**: [Next.js 16](https://nextjs.org/) (App Router)
 - **Database**: [Supabase](https://supabase.com/)
 - **Styling**: [Tailwind CSS](https://tailwindcss.com/)
 - **Animation**: [Framer Motion](https://www.framer.com/motion/)

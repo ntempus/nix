@@ -190,7 +190,7 @@ export default function SecretView() {
                     }
 
                     // Timer logic for mock (persistence)
-                    const storageKey = `burnlink_expiry_${hash || 'demo'}`;
+                    const storageKey = `nix_expiry_${hash || 'demo'}`;
                     const storedExpiry = localStorage.getItem(storageKey);
                     const now = Date.now();
 
