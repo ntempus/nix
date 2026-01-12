@@ -442,7 +442,7 @@ export default function Home() {
                 <h3 className="text-white font-medium text-sm">Burn on Read</h3>
               </div>
               <p className="text-xs text-text-muted leading-relaxed pl-11">
-                When you select "Instant" expiration, the link is permanently deleted after the first view.
+                When you select &quot;Instant&quot; expiration, the link is permanently deleted after the first view.
               </p>
             </div>
             <div className="flex flex-col gap-3 p-5 rounded-xl bg-surface-dark border border-border-dark hover:border-border-light transition-colors group">
@@ -457,7 +457,7 @@ export default function Home() {
                 </h3>
               </div>
               <p className="text-xs text-text-muted leading-relaxed pl-11">
-                Your data is encrypted locally. We don't have the keys, so we can't read your secrets.
+                Your data is encrypted locally. We don&apos;t have the keys, so we can&apos;t read your secrets.
               </p>
             </div>
             <div className="flex flex-col gap-3 p-5 rounded-xl bg-surface-dark border border-border-dark hover:border-border-light transition-colors group">
@@ -472,7 +472,7 @@ export default function Home() {
                 </h3>
               </div>
               <p className="text-xs text-text-muted leading-relaxed pl-11">
-                Set a timer for 5m, 1h, or 24h. If the link isn't opened by then, it auto-destructs.
+                Set a timer for 5m, 1h, or 24h. If the link isn&apos;t opened by then, it auto-destructs.
               </p>
             </div>
           </div>
