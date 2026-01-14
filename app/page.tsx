@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { encryptMessage, generateKey, deriveKeyFromPassphrase } from "@/lib/crypto";
@@ -407,6 +408,16 @@ export default function Home() {
                 {loading ? "Creating..." : "Create Link"}
               </button>
             </div>
+          </div>
+
+          <div className="flex justify-center -mt-4">
+            <p className="text-xs text-text-muted flex items-center gap-1.5 opacity-80 hover:opacity-100 transition-opacity">
+              <span className="material-symbols-outlined text-[14px] text-green-500">lock</span>
+              End-to-end encrypted. Zero knowledge.
+              <Link href="/security" className="underline hover:text-primary transition-colors">
+                Learn how
+              </Link>
+            </p>
           </div>
 
           {generatedLink && (

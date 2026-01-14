@@ -1,5 +1,7 @@
 # Nix
 
+[**Live Demo**](https://nix.jaid.dev)
+
 **Nix** is a secure, ephemeral, and zero-knowledge sharing tool for text and files. Share sensitive information like passwords, API keys, or private documents with confidence, knowing they are encrypted in your browser and permanently deleted after being viewed.
 
 ## Features
@@ -29,7 +31,7 @@
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/nix.git
+   git clone https://github.com/ntempus/nix.git
    cd nix
    ```
 
@@ -75,6 +77,8 @@ create policy "Anyone can create a secret"
 create policy "Anyone can read a secret"
   on secrets for select
   using (true);
+
+-- Note: This policy is for demonstration. For production, strictly limit SELECT permissions or use Edge Functions to gate access.
 ```
 
 ### Running the App

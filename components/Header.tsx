@@ -18,7 +18,7 @@ export default function Header() {
 
                     <nav className="flex items-center gap-3">
                         <a
-                            href="https://github.com"
+                            href="https://github.com/ntempus/nix"
                             target="_blank"
                             rel="noopener noreferrer"
                             className="p-2 text-text-muted hover:text-white hover:bg-white/5 rounded-lg transition-all duration-200"
@@ -26,6 +26,12 @@ export default function Header() {
                         >
                             <Github className="w-5 h-5" />
                         </a>
+                        <Link
+                            href="/security"
+                            className="p-2 px-3 text-sm font-medium text-text-muted hover:text-white hover:bg-white/5 rounded-lg transition-all duration-200"
+                        >
+                            How it works
+                        </Link>
 
 
                     </nav>
